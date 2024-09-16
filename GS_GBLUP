@@ -1,8 +1,7 @@
 ################适用于GBLUP的GS数据初处理########################
 ####使用于rrBLUP的处理
 #初步过滤
-vcftools --gzvcf clean.vcf.gz --recode --recode-INFO-all --stdout     --maf 0.2  --max-missing 0.9  --minDP 4  --maxDP 1000      \
-    --minQ 30 --minGQ 0 --min-alleles 2  --max-alleles 2 --remove-indels |gzip - > rrblup.vcf.gz  	
+vcftools --vcf /public2/home/maxiao/gwas/new.sample.vcf --min-alleles 2 --max-alleles 2 --maf 0.05 --recode --recode-INFO-all |gzip - > rrblup.vcf.gz  	
 gunzip rrblup.vcf.gz
 # vcftools 生成{ 0,1,2} 矩阵    
 vcftools --vcf rrblup.vcf --012 --out snp_matrix 
