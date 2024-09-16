@@ -1,0 +1,21 @@
+export PATH= /public/software/apps/vcftools_0.1.13/bin/:$PATH
+export PATH= //public/software/apps/plink/plink1.9/:$PATH
+
+###遗传力计算
+plink  --vcf test.vcf.gz --recode --out test --double-id
+plink  --file test --make-bed --out test
+plink  --bfile test --make-bed --maf 0.05 --out kept.test
+plink  --bfile kept.test --recode vcf --out kept.test
+bgzip kept.test.vcf
+
+# prune the genotype dataset
+ldak --bfile kept.test --cut-weights snps --window-prune 0.98
+
+# weighting
+ldak --bfile kept.test  --calc-weights-all snps  
+
+# calculate kinship
+ldak  --calc-kins-direct LDAK-Thin --bfile  new q --weights snps/weights.all --power -.5 
+
+# estimate heritability
+ldak --pheno ph.txt --mpheno 1  --grm LDAK-Thin  --covar pheno.cov --reml trait1 --constrain YES
