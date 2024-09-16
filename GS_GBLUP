@@ -1,0 +1,112 @@
+################适用于GBLUP的GS数据初处理########################
+####使用于rrBLUP的处理
+#初步过滤
+vcftools --gzvcf clean.vcf.gz --recode --recode-INFO-all --stdout     --maf 0.2  --max-missing 0.9  --minDP 4  --maxDP 1000      \
+    --minQ 30 --minGQ 0 --min-alleles 2  --max-alleles 2 --remove-indels |gzip - > rrblup.vcf.gz  	
+gunzip rrblup.vcf.gz
+# vcftools 生成{ 0,1,2} 矩阵    
+vcftools --vcf rrblup.vcf --012 --out snp_matrix 
+##R    
+data<-as.matrix(read.table("snp_matrix.012",header = F))
+data1<-data[,-c(1)] #去列名
+data2 <- data1 - 1 #0,1,2 转-1,0,1
+write.table(data2, file="SNP_TMP.txt", row.names=FALSE, col.names=FALSE)#保存文件为纯数字的txt格式
+##shell
+cat SV_TMP.txt | sed 's/-2/NA/g'  > sv.txt
+
+####################使用GBLUP进行GS##############################
+####################准确率预测
+install.packages("plyr")
+library(rrBLUP)
+library(plyr)
+pheno<-as.matrix(read.table(file="trait.txt",header=TRUE))
+markers<-as.matrix(read.table(file="snp.txt"),header=FALSE)
+dim(markers)
+dim(pheno)
+impute<-A.mat(markers,max.missing = 0.5,impute.method = "mean",return.imputed = T)
+markers_impute=impute$imputed
+yield_answer<-mixed.solve(pheno,Z=markers_impute,K=NULL,SE=FALSE,return.Hinv = FALSE)
+YLD<-yield_answer$u
+e=as.matrix(YLD)
+pred_yield_valid=markers_impute %*% e
+pred_yield=pred_yield_valid[,1]+c(yield_answer$beta)
+YLD_accuracy<-cor(pred_yield_valid,pheno,use="complete")
+YLD_accuracy
+traits=1
+cycles=100
+accuracy=matrix(nrow=cycles,ncol = traits)
+for(r in 1:cycles){train=as.matrix(sample(1:195,150))
+  test<-setdiff(1:195,train)
+  pheno_train=pheno[train,]
+  m_train=markers_impute[train,]
+  pheno_valid=pheno[test,]
+  m_valid=markers_impute[test,]
+  
+  yield=pheno_train
+  yield_answer<-mixed.solve(yield,Z=m_train,K=NULL,SE=FALSE,return.Hinv = FALSE)
+  YLD=yield_answer$u
+  e=as.matrix(YLD)
+  pred_yield_valid=m_valid %*% e
+  pred_yield=(pred_yield_valid[,1])+c(yield_answer$beta)
+  pred_yield
+  yield_valid=pheno_valid
+  accuracy[r,1]<-cor(pred_yield_valid,yield_valid,use="complete")
+}
+mean(accuracy)
+
+####################MSE预测
+library(rrBLUP)
+library(plyr)
+
+# Load phenotypic and marker data
+pheno <- as.matrix(read.table(file="trait.txt", header=TRUE))
+markers <- as.matrix(read.table(file="snp.txt", header=FALSE))
+
+# Impute missing marker data
+impute <- A.mat(markers, max.missing = 0.5, impute.method = "mean", return.imputed = TRUE)
+markers_impute = impute$imputed
+
+# Initial model fitting
+yield_answer <- mixed.solve(pheno, Z=markers_impute, K=NULL, SE=FALSE, return.Hinv = FALSE)
+YLD <- yield_answer$u
+e = as.vector(YLD)  # Make sure it's a vector
+pred_yield_valid = markers_impute %*% e
+
+# Ensure beta is a vector of appropriate length
+beta_vector = rep(yield_answer$beta, nrow(pheno))
+
+# Compute predictions
+pred_yield = pred_yield_valid[,1] + beta_vector
+
+# Check dimensions to ensure they match
+print(paste("Dimensions of pred_yield:", length(pred_yield)))
+print(paste("Dimensions of pheno:", nrow(pheno)))
+
+# Calculate MSE for initial fitting, explicitly handling NA values
+initial_MSE <- mean((pheno - pred_yield)^2, na.rm = TRUE)
+print(initial_MSE)
+
+mse = numeric(cycles)  # Initialize MSE as a numeric vector for simplicity
+
+for (r in 1:cycles) {
+  train = sample(1:195, 150)
+  test = setdiff(1:195, train)
+  pheno_train = pheno[train,]
+  m_train = markers_impute[train,]
+  pheno_valid = pheno[test,]
+  m_valid = markers_impute[test,]
+  
+  yield_answer <- mixed.solve(pheno_train, Z = m_train, K = NULL, SE = FALSE, return.Hinv = FALSE)
+  YLD = yield_answer$u
+  e = as.vector(YLD)  # Ensure e is a vector
+  pred_yield_valid = m_valid %*% e
+  beta_vector = rep(yield_answer$beta, length = length(pred_yield_valid[,1]))  # Ensure beta is replicated correctly
+  
+  pred_yield = pred_yield_valid[,1] + beta_vector  # Correct vector addition
+  
+  # Calculate MSE, ensuring no NA values interfere
+  mse[r] <- mean((pheno_valid - pred_yield)^2, na.rm = TRUE)
+}
+
+average_MSE <- mean(mse)
+print(average_MSE)
