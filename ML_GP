@@ -1,0 +1,101 @@
+###############机器学习的GS数据初步处理##############################
+#过滤保留双等位基因
+vcftools --vcf /public2/home/maxiao/gwas/new.sample.vcf --min-alleles 2 --max-alleles 2 --maf 0.05 --recode --recode-INFO-all --out ./snp_maf0.05_allele2.vcf 
+#通过LD过滤
+plink --vcf snp_maf0.05_allele2.vcf --indep-pairwise 100 50 0.2 --out snp_LD_filter.vcf --allow-extra-chr --make-bed 
+#挑选LD保存的标记，生成过滤后标记
+plink --vcf snp_LD_filter.vcf --extract snp_filter.vcf.prune.in --out prunData --recode 12 --allow-extra-chr 
+#转换回vcf文件
+perl /public/software/apps/tassel/run_pipeline.pl -fork1 -plink -ped prunData.ped -map prunData.map -export snp_use_LD.vcf -exportType VCF -runfork1 
+#利用beagle软件填充缺失值
+java -Xmx5g -jar beagle.22Jul22.46e.jar nthreads=20 gt=snp_use_LD.vcf out=snp_use_impute_out 
+#解压
+gzip -d snp_use_impute_out.vcf.gz 
+#改成数值型格式，把0|0改成0,0|1改成1,1|1改成2，直接sed也行
+perl change_vcf_format_impute.pl snp_use_impute_out.vcf > snp_numeric_format.vcf 
+# #去掉不需要的列
+cut -f3,10- snp_numeric_format.vcf > R_use_format.vcf 
+#去掉注释信息，生成模型构建需要用的文件
+grep -v '^#' R_use_format.vcf >R_use_format1.vcf 
+
+####################################GP机器学习代码############################################
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import mean_squared_error
+from sklearn.linear_model import ElasticNet
+
+# 读取数据
+data = pd.read_csv('../R_use_format1.vcf', sep="\t", index_col=0)
+data1 = data.T
+phe = pd.read_csv('../QYK.txt', sep="\t", index_col=0)
+
+# 选择样本和特征
+use_phe = phe["QYK"].dropna()
+GD1 = data1.loc[use_phe.index]
+variances = GD1.var()
+columns_to_drop = variances[variances == 0].index
+GD1_clean = GD1.drop(columns=columns_to_drop)
+
+# 定义参数网格
+param_grid = {
+    'alpha': [0.1, 1, 10],
+    'l1_ratio': [0.1, 0.5, 0.9]
+}
+
+# 保存结果的字典
+data_results = {}
+
+# 重复实验500次
+for i in range(500):
+    # 随机划分训练集和测试集
+    train_y = use_phe.sample(frac=.8)
+    train_x = GD1_clean.loc[train_y.index]
+    test_y = use_phe.drop(train_y.index, axis=0)
+    test_x = GD1_clean.drop(train_y.index, axis=0)
+
+    # 创建GridSearchCV对象
+    grid_search = GridSearchCV(estimator=ElasticNet(), param_grid=param_grid, cv=5)
+
+    # 执行网格搜索
+    grid_search.fit(train_x, train_y.values.ravel())
+
+
+    # 输出最佳参数
+    best_params = grid_search.best_params_
+    print("Best parameters found in iteration", i+1, ":", best_params)
+
+    # 使用最佳参数重新实例化ElasticNet模型
+    best_regr = ElasticNet(**best_params)
+
+    # 训练模型
+    best_regr.fit(train_x, train_y.values.ravel())
+
+    # 预测
+    y_pred = best_regr.predict(test_x)
+    y_pred = pd.DataFrame(y_pred, index=test_y.index)  # 确保预测值与真实值有相同的索引
+
+    # 计算相关性和预测偏差
+    corr = test_y.corr(y_pred.iloc[:, 0])
+    mse = mean_squared_error(test_y, y_pred)
+    rmse = np.sqrt(mse)  # 计算RMSE
+
+    # 保存相关性、MSE和RMSE
+    data_results[i] = {'corr': corr, 'mse': mse, 'rmse': rmse}
+
+# 保存结果
+results_df = pd.DataFrame.from_dict(data_results, orient='index')
+results_df.to_csv('ElasticNet_results.csv', sep=',')
+
+####################################绘图############################################
+library(ggplot2)
+mydata<-read.table("combine_five_method_results.txt",header=TRUE,sep="\t")
+mydata$Accuracy=abs(mydata$Accuracy) 
+
+p1<-ggplot(mydata, aes(x=Phenotype, y=Accuracy, fill=Method))+labs(x="Phenotype", y="Prediction accuracy") +
+  geom_boxplot(width=0.8)+ylim(0,1)+
+  theme_classic()+theme(
+    legend.position="right",legend.title = element_text(color = "black", size = 10), legend.text = element_text(color = "black", size = 10),axis.text = element_text(color="black",size=10),axis.title.x=element_text(margin = margin(t = 10, r = 0, b = 0, l = 0),size=10),axis.title.y=element_text(size=10))+
+  scale_fill_manual(values=c("#DD3226","#5EBCD5","#F88301","#07B294","#F1AC00"))
+
+ggsave(plot=p1,"GS_accuracy.pdf", width = 18, height = 8, units = "cm")
