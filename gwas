@@ -1,0 +1,13 @@
+for m in GLM MLM MLMLM CMLM ECMLM SUPER FarmCPU Blink FaST EMMA EMMAx;do
+    echo "Rscript gapit_gwas.r -i $hmp -t value.tsv  -m $m  -n hd.$m.GWAS.Results"
+    Rscript  gapit_gwas.r -i output.hampmap -t value.tsv  -m $m  -n GWAS.Results
+done
+
+#曼哈顿图绘制
+library(CMplot)
+data=read.csv("test.csv",header=T)
+CMplot(data,plot.type="m", threshold=c(0.01,0.05)/nrow(data), amplify = T, multracks=TRUE, signal.cex = 1,file.output=TRUE,cex.axis=1,file="pdf")
+CMplot(data,plot.type="m", threshold=c(0.01,0.05)/nrow(data), amplify = T, multracks=TRUE, signal.cex = 1,file.output=TRUE,cex.axis=1)
+CMplot(data,plot.type="q",col=c("dodgerblue1", "olivedrab3", "darkgoldenrod1"),threshold=c(0.01,0.05)/nrow(data), signal.pch=19,signal.cex=0.5,signal.col="blue",conf.int.col="grey",box=FALSE,multracks=TRUE,memo="",dpi=300,file.output=TRUE,verbose=TRUE)
+CMplot(data,plot.type="q",col=c("dodgerblue1", "olivedrab3", "darkgoldenrod1"),threshold=c(0.01,0.05)/nrow(data), signal.pch=19,signal.cex=0.5,signal.col="blue",conf.int.col="grey",box=FALSE,multracks=TRUE,memo="",dpi=300,file.output=TRUE,verbose=TRUE,file="pdf")
+
