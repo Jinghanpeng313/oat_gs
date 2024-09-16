@@ -14,24 +14,24 @@ gzip -d snp_use_impute_out.vcf.gz
 #改成数值型格式，把0|0改成0,0|1改成1,1|1改成2，直接sed也行
 perl change_vcf_format_impute.pl snp_use_impute_out.vcf > snp_numeric_format.vcf 
 # #去掉不需要的列
-cut -f3,10- snp_numeric_format.vcf > R_use_format.vcf 
+cut -f3,10- snp_numeric_format.vcf > gp.vcf 
 #去掉注释信息，生成模型构建需要用的文件
-grep -v '^#' R_use_format.vcf >R_use_format1.vcf 
+grep -v '^#' gp.vcf >gp1.vcf 
 
 ####################################GP机器学习代码############################################
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.linear_model import ElasticNet
 
 # 读取数据
-data = pd.read_csv('../R_use_format1.vcf', sep="\t", index_col=0)
+data = pd.read_csv('../gp1.vcf', sep="\t", index_col=0)
 data1 = data.T
-phe = pd.read_csv('../QYK.txt', sep="\t", index_col=0)
+phe = pd.read_csv('../value.txt', sep="\t", index_col=0)
 
 # 选择样本和特征
-use_phe = phe["QYK"].dropna()
+use_phe = phe["value"].dropna()
 GD1 = data1.loc[use_phe.index]
 variances = GD1.var()
 columns_to_drop = variances[variances == 0].index
@@ -54,38 +54,33 @@ for i in range(500):
     test_y = use_phe.drop(train_y.index, axis=0)
     test_x = GD1_clean.drop(train_y.index, axis=0)
 
-    # 创建GridSearchCV对象
-    grid_search = GridSearchCV(estimator=ElasticNet(), param_grid=param_grid, cv=5)
+    # 创建GridSearchCV对象，使用MSE作为评分标准
+    grid_search = GridSearchCV(estimator=ElasticNet(), param_grid=param_grid, cv=5, scoring='neg_mean_squared_error', refit=True)
 
     # 执行网格搜索
     grid_search.fit(train_x, train_y.values.ravel())
-
 
     # 输出最佳参数
     best_params = grid_search.best_params_
     print("Best parameters found in iteration", i+1, ":", best_params)
 
-    # 使用最佳参数重新实例化ElasticNet模型
-    best_regr = ElasticNet(**best_params)
-
-    # 训练模型
-    best_regr.fit(train_x, train_y.values.ravel())
-
-    # 预测
-    y_pred = best_regr.predict(test_x)
+    # 使用最佳模型进行预测
+    y_pred = grid_search.predict(test_x)
     y_pred = pd.DataFrame(y_pred, index=test_y.index)  # 确保预测值与真实值有相同的索引
 
-    # 计算相关性和预测偏差
-    corr = test_y.corr(y_pred.iloc[:, 0])
-    mse = mean_squared_error(test_y, y_pred)
+    # 计算相关性和误差指标
+    corr = test_y.corr(y_pred.iloc[:, 0])  # 计算预测值与实际值的相关性
+    mse = mean_squared_error(test_y, y_pred)  # 计算MSE
     rmse = np.sqrt(mse)  # 计算RMSE
+    mae = mean_absolute_error(test_y, y_pred)  # 计算MAE
 
-    # 保存相关性、MSE和RMSE
-    data_results[i] = {'corr': corr, 'mse': mse, 'rmse': rmse}
+    # 保存相关性、MSE、RMSE和MAE
+    data_results[i] = {'corr': corr, 'mse': mse, 'rmse': rmse, 'mae': mae}
 
 # 保存结果
 results_df = pd.DataFrame.from_dict(data_results, orient='index')
 results_df.to_csv('ElasticNet_results.csv', sep=',')
+
 
 ####################################绘图############################################
 library(ggplot2)
